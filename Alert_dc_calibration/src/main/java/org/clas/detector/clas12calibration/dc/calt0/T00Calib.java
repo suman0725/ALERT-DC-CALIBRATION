@@ -1,0 +1,442 @@
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+package org.clas.detector.clas12calibration.dc.calt0;
+import org.clas.detector.clas12calibration.dc.t2d.TableLoader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.PrintWriter;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.clas.detector.clas12calibration.dc.analysis.Coordinate;
+import org.clas.detector.clas12calibration.dc.calt2d.SegmentProperty;
+import org.clas.detector.clas12calibration.viewer.AnalysisMonitor;
+import org.jlab.detector.calib.utils.CalibrationConstants;
+import org.jlab.groot.data.H1F;
+import org.jlab.groot.group.DataGroup;
+import org.jlab.io.base.DataBank;
+import org.jlab.io.base.DataEvent; 
+import org.jlab.detector.calib.utils.ConstantsManager;
+import org.jlab.groot.data.GraphErrors;
+import org.jlab.groot.fitter.DataFitter;
+import org.jlab.groot.math.F1D;
+import org.jlab.io.hipo.HipoDataSource;
+import org.jlab.jnp.hipo4.data.SchemaFactory;
+import org.jlab.rec.dc.Constants;
+import org.jlab.rec.dc.hit.FittedHit;
+import org.jlab.utils.groups.IndexedList;
+import org.jlab.utils.system.ClasUtilsFile;
+/**
+ *
+ * @author KPAdhikari, ziegler
+ */
+public class T00Calib extends AnalysisMonitor{
+    //public HipoDataSync writer = null;
+    //private HipoDataEvent hipoEvent = null;
+    private SchemaFactory schemaFactory = new SchemaFactory();
+    PrintWriter pw = null;
+    File outfile = null;
+    private int runNumber;
+    private String analTabs = "Fully Corrected Time";
+    public T00Calib(String name, ConstantsManager ccdb) throws FileNotFoundException {
+        super(name, ccdb);
+        this.setAnalysisTabNames(analTabs);
+        this.init(false, "T00");  
+        T00Array = new double[nsec][nsl];
+        outfile = new File("Files/ccdbConstantstT00.txt");
+        pw = new PrintWriter(outfile);
+        pw.printf("#& Sector Superlayer T0Correction T0Error\n");
+        
+        String dir = ClasUtilsFile.getResourceDir("CLAS12DIR", "etc/bankdefs/hipo4");
+        schemaFactory.initFromDirectory(dir);
+       
+        if(schemaFactory.hasSchema("TimeBasedTrkg::TBHits")) {
+            System.out.println(" BANK FOUND........");
+        } else {
+            System.out.println(" BANK NOT FOUND........");
+        }
+        //writer = new HipoDataSync(schemaFactory);
+        //writer.setCompressionType(2);
+        //hipoEvent = (HipoDataEvent) writer.createEvent();
+        //writer.open("TestOutPut.hipo");
+        //writer.writeEvent(hipoEvent);
+        
+        
+        
+    }
+    int nsl  = 6;
+    int nsec = 6;
+    
+    boolean[][] Fitted = new boolean[nsec][nsl];
+    int[] nTdcBins =
+    { 50, 50, 50, 50, 50, 50 };
+    int[] nTimeBins =
+    { 50, 50, 50, 50, 50, 50 };
+    double[] tLow =
+    { 80.0, 80.0, 80.0, 80.0, 80.0, 80.0 };
+    
+    public static final double[] tLow4T0Fits  = {-40.0, -40.0, -40.0, -40.0, -40.0, -40.0};
+    public static final double[] tHigh4T0Fits  = {100.0, 100.0, 100.0, 100.0, 100.0, 100.0}; 
+
+    public static  double[][] fitMax ;
+
+
+    //H1F[][][][] h = new H1F[6][6][nSlots7][nCables6];
+    private Map<Coordinate, H1F> TDCHis        = new HashMap<Coordinate, H1F>();    
+    public  Map<Coordinate, FitLine> TDCFits   = new HashMap<Coordinate, FitLine>();
+    public  Map<Coordinate, Double> T0s        = new HashMap<Coordinate, Double>();
+    
+    @Override
+    public void createHistos() {
+        //histo max range for the fit
+        fitMax = new double[nsec][nsl]; 
+        // initialize canvas and create histograms
+        this.setNumberOfEvents(0);
+        DataGroup hgrps = new DataGroup();
+        String hNm;
+        String hTtl;
+        int ijk=-1;
+        for (int i = 0; i < nsec; i++)
+        {
+            for (int j = 0; j < nsl; j++)
+            {
+                hNm = String.format("timeS%dS%d", i + 1, j + 1);
+
+                TDCHis.put(new Coordinate(i,j), new H1F(hNm, 80, tLow4T0Fits[j], tHigh4T0Fits[j])); 
+                                                                                                                                                                                // HBHits
+                hTtl = String.format("time (Sec%d SL%d)", i + 1, j + 1);
+                TDCHis.get(new Coordinate(i,j)).setTitleX(hTtl);
+                TDCHis.get(new Coordinate(i,j)).setLineColor(1);
+                TDCFits.put(new Coordinate(i,j), new FitLine());
+                hgrps.addDataSet(TDCHis.get(new Coordinate(i, j)), 0);
+
+                T0s.put(new Coordinate(i,j), 0.0);
+
+                Fitted[i][j] = false;
+                
+            }
+                
+            this.getDataGroup().add(hgrps, i+1,0,0);
+        }
+
+        this.getDataGroup().add(hgrps,0,0,0);
+        
+        for (int i = 0; i < nsec; i++) {
+                this.getCalib().addEntry(i+1,0,0);
+        }
+        this.getCalib().setName("T00 Table");
+        this.getCalib().fireTableDataChanged();
+    }
+     
+    @Override
+    public void plotHistos() {
+        this.getAnalysisCanvas().getCanvas(analTabs).setGridX(false);
+        this.getAnalysisCanvas().getCanvas(analTabs).setGridY(false);
+        this.getAnalysisCanvas().getCanvas(analTabs).divide(3, 2);
+        this.getAnalysisCanvas().getCanvas(analTabs).update();
+        
+        
+    }
+    @Override
+    public void timerUpdate() {
+    }
+    
+    @Override
+    public void analysis() {
+        this.plotFits();
+    }
+    public void plotFits() {
+        
+        //pw.close();
+        File file2 = new File("");
+        file2 = outfile;
+        DateFormat df = new SimpleDateFormat("MM-dd-yyyy_hh.mm.ss_aa");
+        String fileName = "Files/ccdb_T00Corr_run" + this.runNumber + "time_" 
+                + df.format(new Date())  + ".txt";
+        file2.renameTo(new File(fileName));
+        
+        for (int i = 0; i < nsec; i++)
+        {
+            for (int j = 0; j < nsl; j++)
+            {
+                if(this.fitThisHisto(this.TDCHis.get(new Coordinate(i,j)))==true) {
+                    this.runFit(i, j);
+                    int binmax = this.TDCHis.get(new Coordinate(i,j)).getMaximumBin();
+                    fitMax[i][j] = this.TDCHis.get(new Coordinate(i,j)).getDataX(binmax);
+
+                }
+            }
+        }
+        pw.close();
+        this.getCalib().fireTableDataChanged();  
+        
+    }
+    
+    public int NbRunFit = 0;
+    public static double[][] T00Array; 
+    public void runFit(int i, int j) {
+        
+        System.out.println(" **************** ");
+        System.out.println(" RUNNING THE FITS ");
+        System.out.println(" **************** "); 
+	
+        double[] Tminmax = this.getT0(i, j);
+        T00Array[i][j] = Tminmax[0];
+        //Sector Superlayer Slot Cable T0Correction T0Error
+        pw.printf("%d\t %d\t %.6f\t %.6f\n",
+            (i+1), (j+1), 
+            Tminmax[0], 
+            Tminmax[1]);
+        System.out.printf("%d\t %d\t %.6f\t %.6f\n",
+            (i+1), (j+1),
+            Tminmax[0], 
+            Tminmax[1]);
+        this.updateTable(i, Tminmax[0]);
+        Fitted[i][j] = true;
+        System.out.println(" FITTED ? "+Fitted[i][j]);
+    }
+     private void updateTable(int i, double t0) {
+       this.getCalib().setDoubleValue(t0, "T00", i+1, 0, 0);
+     }
+    
+    int counter = 0;
+    public  HipoDataSource reader = new HipoDataSource();
+    
+
+    int count = 0;
+    public static int polarity =-1;
+    public List<FittedHit> hits = new ArrayList<>();
+    Map<Integer, ArrayList<Integer>> segMapTBHits = new HashMap<Integer, ArrayList<Integer>>();
+    Map<Integer, SegmentProperty> segPropMap = new HashMap<Integer, SegmentProperty>();
+    //List<FittedHit> hitlist = new ArrayList<>();
+    private ReadTT cableMap = new ReadTT();
+    @Override
+    public void processEvent(DataEvent event) {
+        
+        if (!event.hasBank("RUN::config")) {
+            return ;
+        }
+        
+        DataBank bank = event.getBank("RUN::config");
+        int newRun = bank.getInt("run", 0);
+        if (newRun == 0) {
+           return ;
+        } else {
+           count++;
+        }
+        
+        if(count==1) {
+            Constants.Load();
+            TableLoader.FillT0Tables(newRun, "default");
+            ReadTT.Load(newRun, "default"); 
+            runNumber = newRun; 
+        }
+        if(!event.hasBank("TimeBasedTrkg::TBHits")) {
+            return;
+        } 
+        // get segment property
+        
+        DataBank bnkHits = event.getBank("TimeBasedTrkg::TBHits");
+        
+        for (int j = 0; j < bnkHits.rows(); j++) {
+            
+            int sec = bnkHits.getInt("sector", j);
+            int sl = bnkHits.getInt("superlayer", j);
+            
+            double time = (double) bnkHits.getFloat("time", j);
+            if(bnkHits.getByte("trkID", j)!=-1)
+                this.TDCHis.get(new Coordinate(sec-1, sl-1))
+                    .fill(time);
+            }
+        } 
+    
+    public void Plot(int i ) {
+        for(int j = 0; j<nsl; j++) {
+            this.getAnalysisCanvas().getCanvas(analTabs).cd(j);
+            this.getAnalysisCanvas().getCanvas(analTabs)
+                    .draw(this.TDCHis.get(new Coordinate(i, j)));
+
+            if(Fitted[i][j]==true) {
+                this.getAnalysisCanvas().getCanvas(analTabs).cd(j);
+                            this.getAnalysisCanvas().getCanvas(analTabs)
+                                .draw(this.TDCFits.get(new Coordinate(i, j)), "same");
+            }
+        }
+    }
+    
+    @Override
+    public void constantsEvent(CalibrationConstants cc, int col, int row) {
+        String str_sector    = (String) cc.getValueAt(row, 0);
+        
+        System.out.println("sector" +str_sector );
+        IndexedList<DataGroup> group = this.getDataGroup();
+
+       int sector    = Integer.parseInt(str_sector);
+
+       if(group.hasItem(sector,0,0)==true){
+           this.Plot(sector-1);
+       } else {
+           System.out.println(" ERROR: can not find the data group");
+       }
+   
+    }
+
+    private boolean fitThisHisto(H1F h) {
+        boolean pass = false;
+        int nevent = 0;
+        int maxbin = h.getMaximumBin();
+        for (int ix =0; ix< maxbin; ix++) {
+            double y = h.getBinContent(ix);
+            double err = h.getBinError(ix);
+            
+            if(err>0 && y>0) {
+                nevent+=y;
+            }
+        }
+        
+        if(nevent > 99)
+            pass = true;
+        
+        return pass;
+    }
+
+    private double getThreshold(H1F h) {
+        // find the bin at which the integral corresponds to 1% of the full integral to max 
+        // this is the max range to obtain a threshold from a flat line fit
+        double integral = 0;
+        double partintegral = 0;
+        
+        GraphErrors gr = new GraphErrors(); 
+        for (int ix =0; ix< h.getMaximumBin(); ix++) {
+            integral+= h.getBinContent(ix);
+        }
+        double x = 0;
+        for (int ix =0; ix< h.getMaximumBin(); ix++) {
+            x = h.getDataX(ix);
+            double y = h.getBinContent(ix);
+            double err = h.getBinError(ix);
+            if(err<1) {
+                err = 1.4142;
+            }
+            // fill graph
+            gr.addPoint(x, y, 0, err);
+            partintegral += h.getBinContent(ix);
+            
+            if(partintegral>0.5*integral)
+                break;
+        }
+        // fit the graph 
+        F1D f0 = new F1D("f0","[p0]", h.getDataX(0), x);
+        f0.setParameter(0, 0);
+        DataFitter.fit(f0, gr, "Q"); 
+        return f0.getParameter(0);
+    }
+    private double[] getT0(int i, int j) {
+        System.out.println("Getting t0 for i,j = "+i+" "+j);
+        H1F h = this.TDCHis.get(new Coordinate(i,j));
+        
+        double thres = 0;//this.getThreshold(h);
+        double [] T0val = new double[2];
+        F1D f1 = new F1D("f1","[a]*x+[b]", h.getDataX(0), h.getDataX(20));
+        
+        F1D gausFunc = new F1D("gausFunc", "[amp]*gaus(x,[mean],[sigma])+[p0]", 
+                h.getDataX(0), h.getDataX(h.getMaximumBin())); 
+        
+        gausFunc.setParameter(0, h.getMax());
+        gausFunc.setParameter(1, h.getDataX(h.getMaximumBin()));
+        gausFunc.setParameter(2, 25);
+        gausFunc.setParameter(3, 0);
+        
+        DataFitter.fit(gausFunc, h, "Q"); 
+        
+        double tmidY = gausFunc.getParameter(0)/2;
+        double tminY = gausFunc.getParameter(3);
+        double del_min_halfmaxY = tmidY-tminY;
+        
+        double minRangeY = tmidY-del_min_halfmaxY/2;
+        double maxRangeY = tmidY;
+        if(h.getMax()>tmidY && tmidY+(h.getMax()-tmidY)/3 < h.getMax() ) {
+            maxRangeY+=(h.getMax()-tmidY)/3;
+        }
+        
+        System.out.println(" minRangeY "+minRangeY+" maxRangeY "+maxRangeY);
+        
+        f1.setParameter(0, 0);
+        f1.setParameter(1, 0);
+
+        GraphErrors gr = new GraphErrors(); 
+        
+        int t0idx  = -1;
+        int t0midx = -1;
+        double t0 = Double.NEGATIVE_INFINITY; 
+        for (int ix =0; ix< h.getMaximumBin(); ix++) {
+            if(h.getBinContent(ix)>=maxRangeY) {
+                t0midx= ix;
+                break;
+            }
+        }
+        for (int ix =0; ix< h.getMaximumBin(); ix++) {
+            if(h.getBinContent(ix)>=minRangeY) {
+                t0idx= ix;
+                break;
+            }
+        }
+        int diffBins = t0midx - t0idx;
+        System.out.println("diffBins "+diffBins);
+//        for (int ix =0; ix< h.getMaximumBin(); ix++) {
+//            if(h.getBinContent(ix) >thres 
+//                        && t0 == Double.NEGATIVE_INFINITY) {
+//                    t0 = h.getDataX(ix);
+//                    t0idx = ix;
+//                break;
+//            }
+//        }
+        for (int ix =t0idx; ix< t0midx; ix++) {
+            gr.addPoint(h.getDataX(ix), h.getBinContent(ix), 0, h.getBinError(ix));
+        }
+        
+        if(gr.getDataSize(0)>1) {
+            f1.setRange(h.getDataX(t0idx), h.getDataX(t0midx));
+            DataFitter.fit(f1, gr, "Q"); 
+        }
+        
+        double n = tminY-f1.getParameter(1);
+        double d = f1.getParameter(0);
+        double en = -f1.parameter(1).error();
+        double ed = f1.parameter(0).error();
+        double T0 = n/d;
+        double T0Err = this.calcError(n, en, d, ed);
+        if(Double.isNaN(T0)|| Double.isNaN(T0Err)){
+            T0 = 0;
+            T0Err = 1.42;
+        }
+        T0val[1] =T0Err;
+        T0val[0] = T0;
+        h.setOptStat(0);
+        String t = "T00 = "+(float)T0;
+        h.setTitle(t);
+        T0s.put(new Coordinate(i,j), T0);
+        //this.updateTable(i, j, T0);
+        TDCFits.put(new Coordinate(i,j), 
+                new FitLine("f"+""+i+""+j, i, j, 
+                T0, h.getDataX(t0midx+diffBins/2)) );
+        TDCFits.get(new Coordinate(i,j)).setLineStyle(4);
+        TDCFits.get(new Coordinate(i,j)).setLineWidth(2);
+        TDCFits.get(new Coordinate(i,j)).setLineColor(6);
+        TDCFits.get(new Coordinate(i,j)).setParameters(new double[] {f1.getParameter(0), f1.getParameter(1)});
+        
+        return T0val;
+    }
+
+    private double calcError(double n, double en, double d, double ed) {
+        return Math.sqrt((en/d)*(en/d)+(ed*n/(d*d))*(ed*n/(d*d)));
+    }
+}
+
