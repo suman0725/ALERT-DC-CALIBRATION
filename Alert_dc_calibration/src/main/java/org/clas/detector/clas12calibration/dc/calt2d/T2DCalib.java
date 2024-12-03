@@ -142,15 +142,25 @@ public class T2DCalib extends AnalysisMonitor{
                 
                     DataGroup prfdvst = new DataGroup(1,1);
                     //Track Doca vs T histogram
-                    Tvstrkdocas.put(new Coordinate(i), new H2F("trkDocavsT" + (i + 1)*1000+26, "superlayer" + (i + 1)
-                                , 200, 0, 2.0, 200, 0, 500.0+(int)(i/2)*450.0));
+
+                    //switching x and y for filling histos
+                   /*  Tvstrkdocas.put(new Coordinate(i), new H2F("trkDocavsT" + (i + 1)*1000+26, "superlayer" + (i + 1)
+                                , 200, 0, 2.0, 200, 0, 500.0+(int)(i/2)*450.0)); */
+
                     
+                     Tvstrkdocas.put(new Coordinate(i), new H2F("trkDocavsT" + (i + 1) * 1000 + 26, "superlayer" + (i + 1),
+                     200, 0, 500.0 + (int)(i / 2) * 450.0, 200, 0, 2.0));
+                            
                     TvstrkdocasProf.put(new Coordinate(i), new GraphErrors());
                     TvstrkdocasProf.get(new Coordinate(i)).setMarkerColor(i+1);
                     
                     //Calc Doca vs T histogram
-                    Tvscalcdocas.put(new Coordinate(i), new H2F("calcDocavsT" + (i + 1)*1000+26, "superlayer" + (i + 1)
-                            , 200, 0, 2.0, 200, 0, 500.0+(int)(i/2)*450.0));
+                    /* Tvscalcdocas.put(new Coordinate(i), new H2F("calcDocavsT" + (i + 1)*1000+26, "superlayer" + (i + 1)
+                            , 200, 0, 2.0, 200, 0, 500.0+(int)(i/2)*450.0)); */
+
+                    Tvscalcdocas.put(new Coordinate(i), new H2F("calcDocavsT" + (i + 1) * 1000 + 26, "superlayer" + (i + 1),
+                    200, 0, 500.0 + (int)(i / 2) * 450.0, 200, 0, 2.0));
+
                     tdp.addDataSet(TvstrkdocasProf.get(new Coordinate(i)), i);
                     prfdvst.addDataSet(TvstrkdocasProf.get(new Coordinate(i)), 0);
                     TvstrkdocasFits.put(new Coordinate(i), new FitLine());
@@ -464,8 +474,10 @@ public class T2DCalib extends AnalysisMonitor{
                 rf.reFit();    
                 for(FittedHit hit : calhits) {
                          
-                        Tvstrkdocas.get(new Coordinate(hit.get_Superlayer() - 1)).fill(hit.get_ClusFitDoca(), hit.get_Time());
-                        Tvscalcdocas.get(new Coordinate(hit.get_Superlayer() - 1)).fill(hit.get_Doca(), hit.get_Time());
+                        //Tvstrkdocas.get(new Coordinate(hit.get_Superlayer() - 1)).fill(hit.get_ClusFitDoca(), hit.get_Time());
+                        Tvstrkdocas.get(new Coordinate(hit.get_Superlayer() - 1)).fill(hit.get_Time(), hit.get_ClusFitDoca());
+                        //Tvscalcdocas.get(new Coordinate(hit.get_Superlayer() - 1)).fill(hit.get_Doca(), hit.get_Time());
+                        Tvscalcdocas.get(new Coordinate(hit.get_Superlayer() - 1)).fill(hit.get_Time(), hit.get_Doca());
 
                     }
                 }
@@ -664,7 +676,7 @@ public class T2DCalib extends AnalysisMonitor{
     F1D f1 = new F1D("f1","[amp]*gaus(x,[mean],[sigma])+[p0]", 0, 1.8);
     F1D f2 = new F1D("f2","[amp1]*gaus(x,[mean1],[sigma1])+[amp2]*gaus(x,[mean2],[sigma2])+[p02]", 0, 1.8);
     
-    private void filltrkDocavsTGraphs(int i) {
+    /* private void filltrkDocavsTGraphs(int i) {
         
         if(TvstrkdocasProf.get(new Coordinate(i))!=null) {
             
@@ -716,7 +728,67 @@ public class T2DCalib extends AnalysisMonitor{
             }
         }
     }
+ */
 
+
+ private void filltrkDocavsTGraphs(int i) {
+
+    if (TvstrkdocasProf.get(new Coordinate(i)) != null) {
+        
+        TvstrkdocasProf.get(new Coordinate(i)).reset();
+        H2F h2 = Tvstrkdocas.get(new Coordinate(i));
+        ArrayList<H1F> hslice = h2.getSlicesX();
+
+        
+        for (int si = 0; si < hslice.size(); si++) {
+            
+            double amp = hslice.get(si).getBinContent(hslice.get(si).getMaximumBin());
+            double mean = hslice.get(si).getDataX(hslice.get(si).getMaximumBin());
+            
+            if (amp < this.MINENTRIES) {
+                continue;
+            }
+
+            
+            double x = h2.getXAxis().getBinCenter(si); // This is the time
+            double y = hslice.get(si).getMean(); // This is the `trkDoca` (or `doca`)
+
+            
+            double sigma = hslice.get(si).getRMS();
+            
+            
+            if (x / (2. * Constants.wpdist[i]) > 0.9) {
+                // Setup parameters for the double Gaussian fit
+                f2.setParameter(0, amp);
+                f2.setParameter(1, mean);
+                f2.setParameter(4, y + 10);
+                f2.setParameter(2, sigma);
+                f2.setParameter(5, sigma + 10);
+                f2.setParameter(6, 0);
+
+                
+                DataFitter.fit(f2, hslice.get(si), "Q");
+                if (f2.getChiSquare() < 200 && f2.getParameter(1) > 0 && f2.parameter(1).error() < 50) {
+                    // Add the fitted mean and sigma to the profile plot
+                    TvstrkdocasProf.get(new Coordinate(i)).addPoint(x, f2.getParameter(1), 0, sigma);
+                }
+            } else {
+                // Setup parameters for the single Gaussian fit
+                f1.setParameter(0, amp);
+                f1.setParameter(1, mean);
+                f1.setParameter(2, sigma);
+                f1.setParameter(3, 0);
+
+                // Perform the fit and check its validity
+                DataFitter.fit(f1, hslice.get(si), "Q");
+                if (f1.getChiSquare() < 200 && f1.getParameter(1) > 0 && f1.parameter(1).error() < 50) {
+                    // Add the fitted mean and sigma to the profile plot
+                    TvstrkdocasProf.get(new Coordinate(i)).addPoint(x, f1.getParameter(1), 0, f1.getParameter(2));
+                }
+            }
+        }
+    }
+}
 
 
     int count = 0;
@@ -775,10 +847,12 @@ public class T2DCalib extends AnalysisMonitor{
                 double calibTime = (double) (bnkHits.getInt("TDC", i) - bnkHits.getFloat("TProp", i)
                                         - bnkHits.getFloat("TFlight", i) - bnkHits.getFloat("TStart", i) 
                                         - bnkHits.getFloat("T0", i));
+                //changing x to y and y to x for the filling the hisograms 
+               /*  Tvstrkdocas.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1)).fill(bnkHits.getFloat("trkDoca", i), calibTime);
+                Tvscalcdocas.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1)).fill(bnkHits.getFloat("doca", i), calibTime); */
+                Tvstrkdocas.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1)).fill(calibTime, bnkHits.getFloat("trkDoca", i));
+                Tvscalcdocas.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1)).fill(calibTime, bnkHits.getFloat("doca", i));
 
-                Tvstrkdocas.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1)).fill(bnkHits.getFloat("trkDoca", i), calibTime);
-                Tvscalcdocas.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1)).fill(bnkHits.getFloat("doca", i), calibTime);
-                
                 // fill uncalibrated plot
                timeResiFromFile.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1))
                                 .fill(bnkHits.getFloat("timeResidual", i)); 
