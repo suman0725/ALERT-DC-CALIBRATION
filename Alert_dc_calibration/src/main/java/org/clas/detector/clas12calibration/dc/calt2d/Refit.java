@@ -69,6 +69,7 @@ public class Refit {
     private ClusterFitter cf = new ClusterFitter();
     public void reFit() {
         List<FittedCluster> clusters = this.recomposeClusters(hits);
+       
         for(FittedCluster clus : clusters) {
             cf.SetFitArray(clus, "TSC");
             cf.Fit(clus, true);

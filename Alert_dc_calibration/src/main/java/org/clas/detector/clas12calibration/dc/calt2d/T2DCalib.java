@@ -484,6 +484,9 @@ public class T2DCalib extends AnalysisMonitor{
 
 
     public void reProcess() {
+
+        
+        System.out.println("Residual Started");
         //reset histos to refill
         for (int i = 0; i < this.nsl; i++) {
                timeResi.get(new Coordinate(i)).reset();
@@ -495,6 +498,7 @@ public class T2DCalib extends AnalysisMonitor{
         while (reader.hasEvent()) { 
             hits.clear();
             DataEvent event = reader.getNextEvent();
+
             if(event.hasBank("TimeBasedTrkg::TBHits")) {
                 DataBank bnkHits = event.getBank("TimeBasedTrkg::TBHits");
                 
@@ -504,22 +508,26 @@ public class T2DCalib extends AnalysisMonitor{
                 }
 
                 for(FittedHit hit : hits) {
+                    System.out.println("Before refit, TimeResidual = " + hit.get_TimeResidual());
                     hit.set_TimeResidual(-999);
                     updateHit(hit);
                 }
+                
                 //refit with new constants
                 Refit rf = new Refit(hits);
                 rf.reFit();
                 // fill calibrated plot
                 for(FittedHit hit : hits) {
+                    System.out.println("After refit, TimeResidual = " + hit.get_TimeResidual());
                     timeResi.get(new Coordinate(hit.get_Superlayer()-1)).fill(hit.get_TimeResidual());
                 }
 
             } 
+            
         }
         
 
-
+        int eventCount = 0; 
         reader = new HipoDataSource();
         reader.open("TestOutPut.hipo");
         while (reader.hasEvent()) { 
@@ -528,12 +536,16 @@ public class T2DCalib extends AnalysisMonitor{
             if(event.hasBank("TimeBasedTrkg::TBHits")) {
                 DataBank bnkHits = event.getBank("TimeBasedTrkg::TBHits");
                 
+
+
                 for (int i = 0; i < bnkHits.rows(); i++) {
                     if(this.getCalHit(bnkHits, i)!=null)
                         hits.add(this.getCalHit(bnkHits, i));
+                    
                 }
-
+                
                 for(FittedHit hit : hits) {
+
                     hit.set_TimeResidual(-999);
                     updateHit(hit);
                 }
@@ -542,9 +554,11 @@ public class T2DCalib extends AnalysisMonitor{
                 rf.reFit();
                 // fill calibrated plot
                 for(FittedHit hit : hits) {
+                    //System.out.println("After refit, TimeResidual = " + hit.get_TimeResidual());
                     timeResi.get(new Coordinate(hit.get_Superlayer()-1)).fill(hit.get_TimeResidual());
                 }
 
+                
             } 
         }
         
@@ -596,6 +610,7 @@ public class T2DCalib extends AnalysisMonitor{
             this.fitTimeResPlot(timeResiNew.get(new Coordinate(i)), 
                     this.getAnalysisCanvas().getCanvas("Time Residuals"));
         }
+        
         //for(int i = 0; i<this.nsl; i++) {
         //    this.getAnalysisCanvas().getCanvas("Fit Residuals").cd(i);
         //    this.getAnalysisCanvas().getCanvas("Fit Residuals").draw(fitResi.get(new Coordinate(i)));
@@ -604,6 +619,7 @@ public class T2DCalib extends AnalysisMonitor{
         reader.close();
         this.getCalib().fireTableDataChanged();  
     }
+    
          
 
 
@@ -766,7 +782,7 @@ public class T2DCalib extends AnalysisMonitor{
                 // fill uncalibrated plot
                timeResiFromFile.get(new Coordinate(bnkHits.getInt("superlayer", i) - 1))
                                 .fill(bnkHits.getFloat("timeResidual", i)); 
-            //                    System.out.println("====================== filling the residuals");
+                              System.out.println("====================== filling the residuals");
             //                }
                 
             }
@@ -850,6 +866,7 @@ public class T2DCalib extends AnalysisMonitor{
             }
         }
         TableLoader.ReFill();
+        //System.out.println("pass reload fitparameters");
     }
     
     public void Plot(int i,int j) {
@@ -922,6 +939,7 @@ public class T2DCalib extends AnalysisMonitor{
         double beta = bnkHits.getFloat("beta", i);
         double tBeta = bnkHits.getFloat("tBeta", i);
         double resiTime = bnkHits.getFloat("timeResidual", i);
+        //System.out.println("Before refit, TimeResidual = " + resiTime );  
         double resiFit = bnkHits.getFloat("fitResidual", i);
         
 
@@ -1087,18 +1105,21 @@ public class T2DCalib extends AnalysisMonitor{
         return pid;
     } 
     
-    private void updateHit(FittedHit hit) { 
-        double distbeta = TvstrkdocasFitPars.get(new Coordinate(hit.get_Superlayer()-1)).value(4);
-        double deltatime_beta = (Math.sqrt(hit.get_ClusFitDoca() * hit.get_ClusFitDoca() 
+    private void updateHit(FittedHit hit) {
+        //double distbeta = TvstrkdocasFitPars.get(new Coordinate(hit.get_Superlayer()-1)).value(4); 
+        double distbeta = TvstrkdocasFitPars.get(new Coordinate(hit.get_Superlayer()-1)).value(3);
+        double deltatime_beta =(Math.sqrt(hit.get_ClusFitDoca() * hit.get_ClusFitDoca() 
                 + (distbeta * hit.get_Beta() * hit.get_Beta()) 
                 * (distbeta* hit.get_Beta() * hit.get_Beta())) - hit.get_ClusFitDoca()) / Constants.V0AVERAGED;
         hit.set_DeltaTimeBeta(deltatime_beta);
         hit.set_Doca(this.timeToDistance(hit.get_Sector(), hit.get_Superlayer(), hit.get_Beta(), hit.get_ClusFitDoca(), hit.get_Time(), distbeta));
+        
         double x = hit.get_XWire(); 
        // double alphaRadUncor = Math.toRadians(hit.getAlpha());
        // double trkAngle = Math.tan(alphaRadUncor);
        // double cosTkAng = 1./Math.sqrt(trkAngle*trkAngle + 1.);
        // hit.set_X(x + hit.get_LeftRightAmb() * (hit.get_Doca() / cosTkAng) );
+       hit.set_X(x);
         
     }
     

@@ -62,9 +62,11 @@ public class FitPanel {
     }
     public boolean fitted = false;
     public void refit(Map<Coordinate, MnUserParameters> TvstrkdocasFitPars) throws FileNotFoundException{
+        System.out.println("Refit method called.");
         boolean[][] fixedPars = new boolean[4][6];
         for(int j = 0; j<6; j++) {
             pars.get(j).clear();
+            System.out.println("Cleared pars array.");
         }
         int npar = 4;
         for(int j = 0; j<6; j++) {
@@ -108,6 +110,7 @@ public class FitPanel {
         }
         fitted = true;
         this._pM.plotFits(fitted);
+        System.out.println("Refit method finished.");
     }
     
     
